@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image/color"
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -33,6 +35,9 @@ type ChatAPI interface {
 	CreateChat(ctx context.Context, selfID string, userIDs []string, topic string) (graph.Chat, error)
 	SearchUsers(ctx context.Context, query string, top int) ([]graph.User, error)
 	MarkChatRead(ctx context.Context, chatID, userID, tenantID string) error
+	GetPresences(ctx context.Context, ids []string) (map[string]graph.Presence, error)
+	SetPreferredPresence(ctx context.Context, userID string, p graph.PreferredPresence, d time.Duration) error
+	ClearPreferredPresence(ctx context.Context, userID string) error
 }
 
 // AccountInfo identifies a signed-in account.
@@ -57,6 +62,11 @@ type session struct {
 	api      ChatAPI
 	store    *store.Store
 	stopLive func()
+
+	// main goroutine only
+	presence     map[string]graph.Presence
+	stopPresence func()
+	statusLabel  string
 }
 
 // UI is the main window.
@@ -66,6 +76,9 @@ type UI struct {
 	accts Accounts
 	ctx   context.Context
 	spawn func(func()) // runs background work; synchronous in tests
+	sync  bool         // SetSynchronous was called
+
+	updatingStatus bool // suppress onStatusSelected while syncing the selector
 
 	accounts []AccountInfo
 	sessions map[string]*session
@@ -75,6 +88,7 @@ type UI struct {
 	focused  bool         // window has focus (for notifications)
 
 	accountSelect *widget.Select
+	statusSelect  *widget.Select
 	addAccount    *widget.Button
 	signOut       *widget.Button
 	newChat       *widget.Button
@@ -96,6 +110,9 @@ func New(ctx context.Context, app fyne.App, accts Accounts) *UI {
 
 	u.accountSelect = widget.NewSelect(nil, u.onAccountSelected)
 	u.accountSelect.PlaceHolder = "No account"
+	u.statusSelect = widget.NewSelect(statusOptions(), u.onStatusSelected)
+	u.statusSelect.PlaceHolder = "Status"
+	u.statusSelect.Disable()
 	u.addAccount = widget.NewButtonWithIcon("Add account", theme.ContentAddIcon(), u.onLogin)
 	u.signOut = widget.NewButtonWithIcon("Sign out", theme.LogoutIcon(), u.onLogout)
 	u.signOut.Disable()
@@ -108,16 +125,24 @@ func New(ctx context.Context, app fyne.App, accts Accounts) *UI {
 			preview := widget.NewLabel("preview")
 			preview.Truncation = fyne.TextTruncateEllipsis
 			preview.Importance = widget.LowImportance
-			return container.NewVBox(title, preview)
+			dot := canvas.NewCircle(color.Transparent)
+			dotBox := container.NewGridWrap(fyne.NewSquareSize(10), dot)
+			return container.NewBorder(nil, nil, container.NewCenter(dotBox), nil, container.NewVBox(title, preview))
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			if id >= len(u.chats) || u.current == nil || u.current.store == nil {
 				return
 			}
 			c := u.chats[id]
-			box := o.(*fyne.Container)
+			row := o.(*fyne.Container)
+			box := row.Objects[0].(*fyne.Container)
+			dot := row.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Circle)
 			title := box.Objects[0].(*widget.Label)
 			preview := box.Objects[1].(*widget.Label)
+			pid, isOneOnOne := partner(c, u.current.store.Self())
+			p, ok := u.current.presence[pid]
+			dot.FillColor = presenceColor(p, ok && isOneOnOne)
+			dot.Refresh()
 			title.SetText(c.Title(u.current.store.Self()))
 			title.TextStyle = fyne.TextStyle{Bold: c.Unread(u.current.store.Self())}
 			title.Refresh()
@@ -143,7 +168,7 @@ func New(ctx context.Context, app fyne.App, accts Accounts) *UI {
 	u.status.Importance = widget.LowImportance
 	u.status.Wrapping = fyne.TextWrapWord
 
-	top := container.NewBorder(nil, nil, nil, container.NewHBox(u.addAccount, u.signOut), u.accountSelect)
+	top := container.NewBorder(nil, nil, nil, container.NewHBox(u.statusSelect, u.addAccount, u.signOut), u.accountSelect)
 	right := container.NewBorder(
 		container.NewVBox(u.header, widget.NewSeparator()),
 		u.composer.object(), nil, nil,
@@ -159,7 +184,7 @@ func New(ctx context.Context, app fyne.App, accts Accounts) *UI {
 
 // SetSynchronous runs background work inline. Only for tests: the Fyne
 // test driver executes fyne.Do on the calling goroutine.
-func (u *UI) SetSynchronous() { u.spawn = func(f func()) { f() } }
+func (u *UI) SetSynchronous() { u.spawn = func(f func()) { f() }; u.sync = true }
 
 // Window returns the main window.
 func (u *UI) Window() fyne.Window { return u.win }
@@ -199,6 +224,7 @@ func (u *UI) setAccounts(accs []AccountInfo, selectID string) {
 		u.clearMessages()
 		u.signOut.Disable()
 		u.newChat.Disable()
+		u.statusSelect.Disable()
 		u.accountSelect.ClearSelected()
 		u.setStatus("Not signed in. Use “Add account” to sign in with your work account.")
 		return
@@ -229,12 +255,15 @@ func (u *UI) switchAccount(a AccountInfo) {
 	u.chats = nil // drop the previous account's rows before any refresh
 	u.chatList.UnselectAll()
 	u.clearMessages()
+	u.showOwnStatus(s)
 	if s.store != nil {
 		u.newChat.Enable()
+		u.statusSelect.Enable()
 		u.refreshChats()
 		return
 	}
 	u.newChat.Disable()
+	u.statusSelect.Disable()
 	u.setStatus("Loading chats for " + a.Username + "…")
 	u.spawn(func() { u.loadSession(s) })
 }
@@ -268,6 +297,7 @@ func (u *UI) loadSession(s *session) {
 		s.store = st
 		if u.current == s {
 			u.newChat.Enable()
+			u.statusSelect.Enable()
 		}
 		if err != nil {
 			u.setStatus(errorText("Could not load chats", err))
@@ -278,6 +308,7 @@ func (u *UI) loadSession(s *session) {
 	if err == nil {
 		st.SetChats(chats) // emits ChatsChanged → refreshChats on main goroutine
 		u.startLive(s)
+		u.startPresence(s)
 	}
 }
 
@@ -401,8 +432,13 @@ func (u *UI) onLogout() {
 				u.setStatus(errorText("Sign-out failed", err))
 				return
 			}
-			if s := u.sessions[id]; s != nil && s.stopLive != nil {
-				s.stopLive()
+			if s := u.sessions[id]; s != nil {
+				if s.stopLive != nil {
+					s.stopLive()
+				}
+				if s.stopPresence != nil {
+					s.stopPresence()
+				}
 			}
 			delete(u.sessions, id)
 			u.setAccounts(accs, "")

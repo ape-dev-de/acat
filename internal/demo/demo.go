@@ -385,3 +385,23 @@ func (a *Accounts) Push(text string) {
 	chatID, msgID := a.api.Incoming(text)
 	h.OnMessage(chatID, msgID, "created")
 }
+
+// GetPresences implements ui.ChatAPI with fixed demo presence.
+func (a *API) GetPresences(_ context.Context, ids []string) (map[string]graph.Presence, error) {
+	fixed := map[string]string{janeID: graph.AvailAvailable, tomID: graph.AvailBusy}
+	out := map[string]graph.Presence{}
+	for _, id := range ids {
+		if av, ok := fixed[id]; ok {
+			out[id] = graph.Presence{ID: id, Availability: av, Activity: av}
+		}
+	}
+	return out, nil
+}
+
+// SetPreferredPresence implements ui.ChatAPI.
+func (a *API) SetPreferredPresence(context.Context, string, graph.PreferredPresence, time.Duration) error {
+	return nil
+}
+
+// ClearPreferredPresence implements ui.ChatAPI.
+func (a *API) ClearPreferredPresence(context.Context, string) error { return nil }

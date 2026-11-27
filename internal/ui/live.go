@@ -193,5 +193,9 @@ func (u *UI) stopAllLive() {
 			s.stopLive()
 			s.stopLive = nil
 		}
+		if s.stopPresence != nil {
+			s.stopPresence()
+			s.stopPresence = nil
+		}
 	}
 }
