@@ -28,6 +28,11 @@ type Config struct {
 	MaxBodyBytes   int64          // ACAT_MAX_BODY_BYTES, default 64 KiB
 	MaxConnsPerIP  int            // ACAT_MAX_CONNS_PER_IP, default 256 (corporate NAT)
 
+	ACSConnectionString string   // ACAT_ACS_CONNECTION_STRING; empty = /acs/token disabled
+	AllowedTenants      []string // ACAT_ALLOWED_TENANTS, comma-separated; empty = any
+	AllowedAppIDs       []string // ACAT_ALLOWED_APP_IDS, comma-separated; empty = any
+	ACSRatePerMin       float64  // token exchanges per minute per IP
+
 	WSConnectRate  float64       // new WS connections per second per IP
 	WSConnectBurst int           //
 	HookRate       float64       // forwarded notifications per second per routing token
@@ -54,6 +59,7 @@ func DefaultConfig() Config {
 		HelloTimeout:   10 * time.Second,
 		PingInterval:   30 * time.Second,
 		WriteTimeout:   10 * time.Second,
+		ACSRatePerMin:  20,
 	}
 }
 
@@ -70,6 +76,14 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	setStr(&c.TLSMode, "ACAT_TLS_MODE")
 	setStr(&c.Domain, "ACAT_DOMAIN")
 	setStr(&c.CertDir, "ACAT_CERT_DIR")
+	setStr(&c.ACSConnectionString, "ACAT_ACS_CONNECTION_STRING")
+	c.AllowedTenants = splitList(getenv("ACAT_ALLOWED_TENANTS"))
+	c.AllowedAppIDs = splitList(getenv("ACAT_ALLOWED_APP_IDS"))
+	if c.ACSConnectionString != "" {
+		if _, err := ParseACSConnectionString(c.ACSConnectionString); err != nil {
+			return c, fmt.Errorf("ACAT_ACS_CONNECTION_STRING: %w", err)
+		}
+	}
 
 	if v := getenv("ACAT_MAX_BODY_BYTES"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
@@ -103,6 +117,16 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 		return c, fmt.Errorf("unknown ACAT_TLS_MODE %q (want %q or %q)", c.TLSMode, TLSModeProxy, TLSModeAutocert)
 	}
 	return c, nil
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func parsePrefixes(s string) ([]netip.Prefix, error) {

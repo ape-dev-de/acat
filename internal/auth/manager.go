@@ -203,3 +203,19 @@ func tokenKey(acc Account, scopes []string) string {
 	}
 	return k
 }
+
+// Consent runs an interactive sign-in for additional scopes of another
+// resource (e.g. ACSScopes) for an existing account, then caches the token.
+func (m *Manager) Consent(ctx context.Context, acc Account, scopes []string) error {
+	res, err := m.client.AcquireTokenInteractive(ctx, scopes, public.WithLoginHint(acc.Username()))
+	if err != nil {
+		return fmt.Errorf("auth: consent: %w", err)
+	}
+	m.remember(acc, scopes, res)
+	return nil
+}
+
+// ACSToken returns a function providing Entra tokens with ACS scopes.
+func (m *Manager) ACSToken(acc Account) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) { return m.Token(ctx, acc, ACSScopes) }
+}

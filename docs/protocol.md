@@ -9,6 +9,12 @@ Types and version constants live in [`pkg/protocol`](../pkg/protocol). They are 
 3. Relay pushes `{"type":"notification"|"lifecycle","payload":<Graph webhook body, unchanged>}` frames. Subscriptions are created without resource data, so payloads contain IDs only.
 4. In v1 the client sends **nothing** after `hello`; any data frame closes the connection. Keepalive uses WebSocket pings (every 30 s).
 
+Features currently defined: `acs-token` (the relay offers `POST /acs/token`).
+
+## ACS token exchange (`POST /acs/token`)
+
+Request `{"token":"<Entra access token, audience ACS, scopes Teams.ManageCalls + Teams.ManageChats>"}`; response `{"token":"<ACS token>","expiresOn":"…"}` with `Cache-Control: no-store`. The relay reads `oid`, `tid` and `appid`/`azp` from the token **without** verifying it (ACS verifies it), applies `ACAT_ALLOWED_APP_IDS` / `ACAT_ALLOWED_TENANTS`, signs the ACS request with HMAC-SHA256 (`teamsUser/:exchangeAccessToken?api-version=2023-10-01`) and passes the result through. Errors: 400 malformed token, 403 not allowed or rejected by ACS, 429 rate limited, 501 not configured, 502 ACS unavailable.
+
 Close codes: `1001 going away` (relay shutdown, reconnect), `1008 policy violation` (no/invalid hello, unsupported version, slow consumer), `1013 try again later` (too many connections from the address). Hello must arrive within 10 s.
 
 The routing token (192 bit, base64url) is valid only for this connection. After a reconnect the client gets a new one and must re-point its Graph subscriptions (`PATCH notificationUrl`).

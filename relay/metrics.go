@@ -17,6 +17,7 @@ type metrics struct {
 	validations counterVec // kind
 	forwarded   counterVec // kind
 	dropped     counterVec // reason
+	acs         counterVec // result
 }
 
 // Drop and reject reasons (fixed label values).
@@ -29,6 +30,11 @@ const (
 	reasonTooMany      = "too_many_conns"
 	reasonHandshake    = "handshake"
 	reasonVersion      = "version"
+
+	acsOK            = "ok"
+	acsRejected      = "rejected"
+	acsRateLimited   = "ratelimit"
+	acsUpstreamError = "upstream_error"
 )
 
 type counterVec map[string]*atomic.Uint64
@@ -60,6 +66,7 @@ func newMetrics() *metrics {
 		validations: newCounterVec(kindNotification, kindLifecycle),
 		forwarded:   newCounterVec(kindNotification, kindLifecycle),
 		dropped:     newCounterVec(reasonUnknownToken, reasonInvalid, reasonTooLarge, reasonRateLimit, reasonSlowConsumer),
+		acs:         newCounterVec(acsOK, acsRejected, acsRateLimited, acsUpstreamError),
 	}
 }
 
@@ -91,4 +98,5 @@ func (m *metrics) write(w io.Writer) {
 	vec("acat_relay_hook_validations_total", "Answered Graph validation requests.", "kind", m.validations)
 	vec("acat_relay_hook_forwarded_total", "Notifications forwarded to a client.", "kind", m.forwarded)
 	vec("acat_relay_hook_dropped_total", "Notifications dropped.", "reason", m.dropped)
+	vec("acat_relay_acs_exchanges_total", "ACS token exchanges.", "result", m.acs)
 }

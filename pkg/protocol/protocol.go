@@ -39,6 +39,13 @@ const (
 	ErrCodeTooManyConnections = "too_many_connections"
 )
 
+// Features announced in Welcome.Features.
+const (
+	// FeatureACSToken: POST /acs/token exchanges a Teams user's Entra
+	// token (ACS scopes) for an ACS access token.
+	FeatureACSToken = "acs-token"
+)
+
 // CloseSlowConsumer is the close reason when a client cannot keep up.
 const CloseSlowConsumer = "slow consumer"
 
