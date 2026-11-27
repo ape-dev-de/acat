@@ -3,15 +3,19 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"sync/atomic"
 
+	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 
 	"github.com/ape-dev-de/acat/internal/auth"
 	"github.com/ape-dev-de/acat/internal/config"
 	"github.com/ape-dev-de/acat/internal/demo"
+	"github.com/ape-dev-de/acat/internal/single"
 	"github.com/ape-dev-de/acat/internal/ui"
 	"github.com/ape-dev-de/acat/internal/version"
 )
@@ -29,6 +33,26 @@ func main() {
 		return
 	}
 
+	// One instance per user (demo mode may run alongside).
+	var win atomic.Pointer[fyne.Window]
+	if !*demoMode {
+		if dir, err := config.Dir(); err == nil {
+			inst, err := single.Acquire(dir, func() {
+				fyne.Do(func() {
+					if w := win.Load(); w != nil {
+						(*w).Show()
+						(*w).RequestFocus()
+					}
+				})
+			})
+			if errors.Is(err, single.ErrAlreadyRunning) {
+				fmt.Fprintln(os.Stderr, "acat is already running; showing its window")
+				return
+			}
+			defer inst.Release() // nil-safe if acquiring failed for another reason
+		}
+	}
+
 	accts, err := accounts(*demoMode)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "acat:", err)
@@ -41,7 +65,9 @@ func main() {
 	a := app.NewWithID(appID)
 	u := ui.New(ctx, a, accts)
 	u.Start()
-	u.Window().ShowAndRun()
+	w := u.Window()
+	win.Store(&w)
+	w.ShowAndRun()
 	if s, ok := accts.(interface{ StopCalls() }); ok {
 		s.StopCalls()
 	}
