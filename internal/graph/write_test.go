@@ -21,7 +21,7 @@ func captureServer(t *testing.T, status int, resp string) (*Client, *captured) {
 	t.Helper()
 	cap := &captured{}
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cap.method, cap.path, cap.query, cap.headers = r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Clone()
+		cap.method, cap.path, cap.query, cap.headers, cap.body = r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Clone(), nil
 		b, _ := io.ReadAll(r.Body)
 		if len(b) > 0 {
 			if err := json.Unmarshal(b, &cap.body); err != nil {
