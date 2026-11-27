@@ -104,7 +104,7 @@ Liegt als maschinenlesbare Spezifikation in `/infra`; der Infra-Agent legt die R
 ## 4. Milestones
 
 Regeln für die Umsetzung:
-- Jeder Milestone = ein PR auf `main`, Akzeptanzkriterien als Checkliste im PR.
+- Es wird direkt auf `main` gearbeitet (einziger Entwickler). Akzeptanzkriterien stehen als Checkliste im GitHub-Milestone bzw. Tracking-Issue; CI muss grün bleiben.
 - Kriterien sind gekennzeichnet: **[auto]** = in CI/Tests prüfbar und damit eigenständig abschließbar. **[manuell]** = braucht einen Menschen, einen echten Mandanten oder einen echten Teams-Client. Manuelle Punkte werden gesammelt und an **Checkpoints** gemeinsam abgenommen, damit sie den Weiterbau nicht blockieren.
 - Erst Tests/Mocks, dann Implementierung. Echte Graph-Aufrufe nur in Tests mit Build-Tag `integration`.
 

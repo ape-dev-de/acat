@@ -3,7 +3,7 @@
 Read `docs/plan.md` first. It is the source of truth for architecture and milestones.
 
 ## Rules
-- One milestone per PR. Copy its acceptance criteria into the PR body as a checklist.
+- Work directly on `main` (sole developer). One commit series per milestone; acceptance checklist goes into the GitHub milestone description or a tracking issue.
 - [auto] criteria must pass in CI. For each [manuell] criterion open an issue labeled `needs-human` and keep building instead of waiting.
 - Tests/mocks first, then implementation. Real Graph/ACS calls only behind the `integration` build tag.
 - Zero knowledge: the relay never logs bodies, IDs, tokens or query strings. Keep `docs/privacy.md` accurate.
