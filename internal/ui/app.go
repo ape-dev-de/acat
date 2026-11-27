@@ -25,6 +25,13 @@ type ChatAPI interface {
 	ListChats(ctx context.Context, limit int) ([]graph.Chat, error)
 	ListMessages(ctx context.Context, chatID string, top int) (graph.Page[graph.Message], error)
 	MoreMessages(ctx context.Context, nextLink string) (graph.Page[graph.Message], error)
+	GetChat(ctx context.Context, chatID string) (graph.Chat, error)
+	SendMessage(ctx context.Context, chatID string, m graph.NewMessage) (graph.Message, error)
+	EditMessage(ctx context.Context, chatID, messageID string, m graph.NewMessage) error
+	DeleteMessage(ctx context.Context, chatID, messageID string) error
+	CreateChat(ctx context.Context, selfID string, userIDs []string, topic string) (graph.Chat, error)
+	SearchUsers(ctx context.Context, query string, top int) ([]graph.User, error)
+	MarkChatRead(ctx context.Context, chatID, userID, tenantID string) error
 }
 
 // AccountInfo identifies a signed-in account.
@@ -67,7 +74,9 @@ type UI struct {
 	accountSelect *widget.Select
 	addAccount    *widget.Button
 	signOut       *widget.Button
+	newChat       *widget.Button
 	chatList      *widget.List
+	composer      *composer
 	header        *widget.Label
 	olderBtn      *widget.Button
 	msgBox        *fyne.Container
@@ -123,6 +132,10 @@ func New(ctx context.Context, app fyne.App, accts Accounts) *UI {
 	u.olderBtn.Hide()
 	u.msgBox = container.NewVBox()
 	u.msgScroll = container.NewVScroll(u.msgBox)
+	u.newChat = widget.NewButtonWithIcon("New chat", theme.DocumentCreateIcon(), u.showNewChat)
+	u.newChat.Disable()
+	u.composer = newComposer(u)
+	u.composer.setEnabled(false)
 	u.status = widget.NewLabel("")
 	u.status.Importance = widget.LowImportance
 	u.status.Wrapping = fyne.TextWrapWord
@@ -130,10 +143,11 @@ func New(ctx context.Context, app fyne.App, accts Accounts) *UI {
 	top := container.NewBorder(nil, nil, nil, container.NewHBox(u.addAccount, u.signOut), u.accountSelect)
 	right := container.NewBorder(
 		container.NewVBox(u.header, widget.NewSeparator()),
-		nil, nil, nil,
+		u.composer.object(), nil, nil,
 		container.NewBorder(u.olderBtn, nil, nil, nil, u.msgScroll),
 	)
-	split := container.NewHSplit(u.chatList, right)
+	left := container.NewBorder(u.newChat, nil, nil, nil, u.chatList)
+	split := container.NewHSplit(left, right)
 	split.Offset = 0.3
 	u.win.SetContent(container.NewBorder(container.NewVBox(top, widget.NewSeparator()), u.status, nil, nil, split))
 	return u
@@ -180,6 +194,7 @@ func (u *UI) setAccounts(accs []AccountInfo, selectID string) {
 		u.chatList.Refresh()
 		u.clearMessages()
 		u.signOut.Disable()
+		u.newChat.Disable()
 		u.accountSelect.ClearSelected()
 		u.setStatus("Not signed in. Use “Add account” to sign in with your work account.")
 		return
@@ -211,9 +226,11 @@ func (u *UI) switchAccount(a AccountInfo) {
 	u.chatList.UnselectAll()
 	u.clearMessages()
 	if s.store != nil {
+		u.newChat.Enable()
 		u.refreshChats()
 		return
 	}
+	u.newChat.Disable()
 	u.setStatus("Loading chats for " + a.Username + "…")
 	u.spawn(func() { u.loadSession(s) })
 }
@@ -245,6 +262,9 @@ func (u *UI) loadSession(s *session) {
 	chats, err := s.api.ListChats(ctx, 0)
 	fyne.Do(func() {
 		s.store = st
+		if u.current == s {
+			u.newChat.Enable()
+		}
 		if err != nil {
 			u.setStatus(errorText("Could not load chats", err))
 			return
@@ -278,7 +298,12 @@ func (u *UI) openChat(chatID string) {
 	u.selected = chatID
 	c, _ := s.store.Chat(chatID)
 	u.header.SetText(c.Title(s.store.Self()))
+	u.composer.reset()
+	u.composer.setEnabled(true)
 	u.renderMessages(true)
+	if c.Unread(s.store.Self()) {
+		u.markRead(s, c)
+	}
 
 	if loaded, _ := s.store.State(chatID); loaded {
 		return
@@ -377,6 +402,8 @@ func (u *UI) onLogout() {
 }
 
 func (u *UI) clearMessages() {
+	u.composer.reset()
+	u.composer.setEnabled(false)
 	u.header.SetText("")
 	u.msgBox.Objects = nil
 	u.msgBox.Refresh()
@@ -392,7 +419,7 @@ func (u *UI) renderMessages(scrollToEnd bool) {
 	msgs := st.Messages(u.selected)
 	objs := make([]fyne.CanvasObject, 0, len(msgs))
 	for _, m := range msgs {
-		objs = append(objs, messageView(m, st.Self()))
+		objs = append(objs, newMessageItem(m, st.Self(), u.showMessageMenu))
 	}
 	u.msgBox.Objects = objs
 	u.msgBox.Refresh()

@@ -2,6 +2,7 @@ package ui_test
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +68,22 @@ func TestDemoFlow(t *testing.T) {
 	waitFor(t, "oldest message", func() bool { return strings.Contains(allText(w.Content()), "Backlog message 1") })
 	waitFor(t, "load-older hidden when complete", func() bool { return !older.Visible() })
 
+	// Open the 1:1 chat with Jane (second by activity): it was unread.
+	fyne.DoAndWait(func() { list.Select(1) })
+	waitFor(t, "jane chat", func() bool { return strings.Contains(allText(w.Content()), "Agenda for tomorrow") })
+
+	// Send via composer: type + Enter.
+	entry := findComposer(t, w.Content())
+	fyne.DoAndWait(func() {
+		test.Type(entry, "Hello from acat")
+		entry.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	})
+	waitFor(t, "sent message", func() bool { return strings.Contains(allText(w.Content()), "Hello from acat") })
+	// The chat moved to the top of the list.
+	waitFor(t, "chat reordered", func() bool {
+		return strings.HasPrefix(allTextOf(list), "Jane Roe")
+	})
+
 	// Second account via "Add account" (demo login).
 	add := findButton(t, w.Content(), "Add account")
 	fyne.DoAndWait(func() { test.Tap(add) })
@@ -87,6 +104,22 @@ func walk(o fyne.CanvasObject, fn func(fyne.CanvasObject)) {
 		}
 	}
 }
+
+// findComposer returns the message input (unexported type submitEntry).
+func findComposer(t *testing.T, root fyne.CanvasObject) fyne.Focusable {
+	var e fyne.Focusable
+	walk(root, func(o fyne.CanvasObject) {
+		if f, ok := o.(fyne.Focusable); ok && e == nil && reflect.TypeOf(o).String() == "*ui.submitEntry" {
+			e = f
+		}
+	})
+	if e == nil {
+		t.Fatal("no composer")
+	}
+	return e
+}
+
+func allTextOf(o fyne.CanvasObject) string { return allText(o) }
 
 func findList(t *testing.T, root fyne.CanvasObject) *widget.List {
 	var l *widget.List

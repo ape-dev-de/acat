@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,8 +70,11 @@ func (a *Accounts) API(string) ui.ChatAPI { return a.api }
 
 // API is a fake ui.ChatAPI.
 type API struct {
-	chats    []graph.Chat
-	messages map[string][]graph.Message // newest first
+	mu        sync.Mutex
+	chats     []graph.Chat
+	messages  map[string][]graph.Message // newest first
+	directory []graph.User
+	nextID    int
 }
 
 var _ ui.ChatAPI = (*API)(nil)
@@ -134,6 +138,12 @@ func NewAPI(now time.Time) *API {
 	empty := graph.Chat{ID: "19:demo-empty@unq.gbl.spaces", ChatType: graph.ChatOneOnOne, LastUpdatedDateTime: at(48 * time.Hour),
 		Members: []graph.ChatMember{{UserID: meID, DisplayName: "You"}, {UserID: tomID, DisplayName: "Tom Miller"}}}
 	a.chats = append(a.chats, empty)
+	a.directory = []graph.User{
+		{ID: janeID, DisplayName: "Jane Roe", Mail: "jane@contoso.example"},
+		{ID: tomID, DisplayName: "Tom Miller", Mail: "tom@contoso.example"},
+		{ID: "00000000-0000-0000-0000-00000000000d", DisplayName: "Anna Schmidt", Mail: "anna@contoso.example"},
+		{ID: "00000000-0000-0000-0000-00000000000e", DisplayName: "Jan Novak", Mail: "jan@contoso.example"},
+	}
 	return a
 }
 
@@ -144,6 +154,8 @@ func (a *API) Me(context.Context) (graph.User, error) {
 
 // ListChats implements ui.ChatAPI.
 func (a *API) ListChats(context.Context, int) ([]graph.Chat, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return append([]graph.Chat(nil), a.chats...), nil
 }
 
@@ -172,6 +184,8 @@ func (a *API) MoreMessages(_ context.Context, next string) (graph.Page[graph.Mes
 }
 
 func (a *API) page(chatID string, off int) graph.Page[graph.Message] {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	all := a.messages[chatID]
 	if off >= len(all) {
 		return graph.Page[graph.Message]{}
@@ -183,3 +197,114 @@ func (a *API) page(chatID string, off int) graph.Page[graph.Message] {
 	}
 	return p
 }
+
+// GetChat implements ui.ChatAPI.
+func (a *API) GetChat(_ context.Context, chatID string) (graph.Chat, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, c := range a.chats {
+		if c.ID == chatID {
+			return c, nil
+		}
+	}
+	return graph.Chat{}, &graph.Error{Status: 404, Code: "NotFound", Message: "chat not found"}
+}
+
+// SendMessage implements ui.ChatAPI.
+func (a *API) SendMessage(_ context.Context, chatID string, m graph.NewMessage) (graph.Message, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.nextID++
+	now := time.Now().UTC()
+	msg := graph.Message{
+		ID: "sent" + strconv.Itoa(a.nextID), ChatID: chatID, MessageType: graph.MessageTypeMessage,
+		CreatedDateTime: now, LastModifiedDateTime: now, Body: m.Body, Mentions: m.Mentions, Attachments: m.Attachments,
+		From: &graph.IdentitySet{User: &graph.Identity{ID: meID, DisplayName: "You"}},
+	}
+	a.messages[chatID] = append([]graph.Message{msg}, a.messages[chatID]...)
+	return msg, nil
+}
+
+func (a *API) find(chatID, messageID string) (*graph.Message, error) {
+	for i := range a.messages[chatID] {
+		if a.messages[chatID][i].ID == messageID {
+			if a.messages[chatID][i].From.UserID() != meID {
+				return nil, &graph.Error{Status: 403, Code: "Forbidden", Message: "only your own messages"}
+			}
+			return &a.messages[chatID][i], nil
+		}
+	}
+	return nil, &graph.Error{Status: 404, Code: "NotFound", Message: "message not found"}
+}
+
+// EditMessage implements ui.ChatAPI.
+func (a *API) EditMessage(_ context.Context, chatID, messageID string, m graph.NewMessage) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	msg, err := a.find(chatID, messageID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	msg.Body, msg.Mentions, msg.LastEditedDateTime = m.Body, m.Mentions, &now
+	return nil
+}
+
+// DeleteMessage implements ui.ChatAPI.
+func (a *API) DeleteMessage(_ context.Context, chatID, messageID string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	msg, err := a.find(chatID, messageID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	msg.DeletedDateTime = &now
+	return nil
+}
+
+// CreateChat implements ui.ChatAPI.
+func (a *API) CreateChat(_ context.Context, selfID string, userIDs []string, topic string) (graph.Chat, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	members := []graph.ChatMember{{UserID: selfID, DisplayName: "You"}}
+	for _, id := range userIDs {
+		for _, u := range a.directory {
+			if u.ID == id && id != selfID {
+				members = append(members, graph.ChatMember{UserID: u.ID, DisplayName: u.DisplayName})
+			}
+		}
+	}
+	chatType := graph.ChatGroup
+	if len(members) == 2 {
+		chatType, topic = graph.ChatOneOnOne, ""
+		for _, c := range a.chats { // Graph returns the existing 1:1 chat
+			if c.ChatType == graph.ChatOneOnOne && len(c.Members) == 2 && (c.Members[1].UserID == members[1].UserID || c.Members[0].UserID == members[1].UserID) {
+				return c, nil
+			}
+		}
+	}
+	a.nextID++
+	c := graph.Chat{ID: "19:demo-new-" + strconv.Itoa(a.nextID) + "@thread.v2", ChatType: chatType, Topic: topic,
+		Members: members, CreatedDateTime: time.Now().UTC(), LastUpdatedDateTime: time.Now().UTC()}
+	a.chats = append(a.chats, c)
+	return c, nil
+}
+
+// SearchUsers implements ui.ChatAPI.
+func (a *API) SearchUsers(_ context.Context, query string, _ int) ([]graph.User, error) {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return nil, nil
+	}
+	var out []graph.User
+	for _, u := range a.directory {
+		if strings.Contains(strings.ToLower(u.DisplayName), q) || strings.HasPrefix(strings.ToLower(u.Mail), q) {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
+// MarkChatRead implements ui.ChatAPI.
+func (a *API) MarkChatRead(context.Context, string, string, string) error { return nil }
