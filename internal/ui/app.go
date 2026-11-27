@@ -26,6 +26,7 @@ type ChatAPI interface {
 	ListMessages(ctx context.Context, chatID string, top int) (graph.Page[graph.Message], error)
 	MoreMessages(ctx context.Context, nextLink string) (graph.Page[graph.Message], error)
 	GetChat(ctx context.Context, chatID string) (graph.Chat, error)
+	GetMessage(ctx context.Context, chatID, messageID string) (graph.Message, error)
 	SendMessage(ctx context.Context, chatID string, m graph.NewMessage) (graph.Message, error)
 	EditMessage(ctx context.Context, chatID, messageID string, m graph.NewMessage) error
 	DeleteMessage(ctx context.Context, chatID, messageID string) error
@@ -52,9 +53,10 @@ type Accounts interface {
 const requestTimeout = 60 * time.Second
 
 type session struct {
-	info  AccountInfo
-	api   ChatAPI
-	store *store.Store
+	info     AccountInfo
+	api      ChatAPI
+	store    *store.Store
+	stopLive func()
 }
 
 // UI is the main window.
@@ -70,6 +72,7 @@ type UI struct {
 	current  *session
 	chats    []graph.Chat // snapshot shown in chatList
 	selected string       // selected chat ID
+	focused  bool         // window has focus (for notifications)
 
 	accountSelect *widget.Select
 	addAccount    *widget.Button
@@ -150,6 +153,7 @@ func New(ctx context.Context, app fyne.App, accts Accounts) *UI {
 	split := container.NewHSplit(left, right)
 	split.Offset = 0.3
 	u.win.SetContent(container.NewBorder(container.NewVBox(top, widget.NewSeparator()), u.status, nil, nil, split))
+	u.setupDesktop()
 	return u
 }
 
@@ -273,6 +277,7 @@ func (u *UI) loadSession(s *session) {
 	})
 	if err == nil {
 		st.SetChats(chats) // emits ChatsChanged → refreshChats on main goroutine
+		u.startLive(s)
 	}
 }
 
@@ -282,6 +287,7 @@ func (u *UI) refreshChats() {
 	}
 	u.chats = u.current.store.Chats()
 	u.chatList.Refresh()
+	u.updateUnread()
 	for i, c := range u.chats {
 		if c.ID == u.selected {
 			u.chatList.Select(i)
@@ -394,6 +400,9 @@ func (u *UI) onLogout() {
 			if err != nil {
 				u.setStatus(errorText("Sign-out failed", err))
 				return
+			}
+			if s := u.sessions[id]; s != nil && s.stopLive != nil {
+				s.stopLive()
 			}
 			delete(u.sessions, id)
 			u.setAccounts(accs, "")

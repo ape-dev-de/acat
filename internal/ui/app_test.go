@@ -81,7 +81,9 @@ func TestDemoFlow(t *testing.T) {
 	waitFor(t, "sent message", func() bool { return strings.Contains(allText(w.Content()), "Hello from acat") })
 	// The chat moved to the top of the list.
 	waitFor(t, "chat reordered", func() bool {
-		return strings.HasPrefix(allTextOf(list), "Jane Roe")
+		txt := allText(list)
+		i, j := strings.Index(txt, "You: Hello from acat"), strings.Index(txt, "Project acat")
+		return i >= 0 && j > i
 	})
 
 	// Second account via "Add account" (demo login).
@@ -118,8 +120,6 @@ func findComposer(t *testing.T, root fyne.CanvasObject) fyne.Focusable {
 	}
 	return e
 }
-
-func allTextOf(o fyne.CanvasObject) string { return allText(o) }
 
 func findList(t *testing.T, root fyne.CanvasObject) *widget.List {
 	var l *widget.List
@@ -171,4 +171,46 @@ func allText(root fyne.CanvasObject) string {
 		}
 	})
 	return sb.String()
+}
+
+func TestLiveIncomingMessage(t *testing.T) {
+	a := test.NewTempApp(t)
+	accts := demo.NewAccounts()
+	accts.LiveInterval = 0 // only explicit pushes
+	u := ui.New(context.Background(), a, accts)
+	u.SetSynchronous()
+	w := u.Window()
+	w.Show()
+	u.Start()
+	list := findList(t, w.Content())
+	waitFor(t, "chat list", func() bool { return list.Length() == 3 })
+	fyne.DoAndWait(func() { list.Select(0) }) // group chat open, not Jane's
+
+	waitFor(t, "title without unread", func() bool { return w.Title() == "acat (1)" || w.Title() == "acat" })
+	fyne.DoAndWait(func() { list.Select(1) }) // read Jane's chat first
+	waitFor(t, "all read", func() bool { return w.Title() == "acat" })
+	fyne.DoAndWait(func() { list.Select(0) })
+
+	fyne.DoAndWait(func() {
+		test.AssertNotificationSent(t, &fyne.Notification{Title: "Jane Roe", Content: "Ping from Jane"}, func() {
+			accts.Push("Ping from Jane")
+		})
+	})
+	waitFor(t, "unread count in title", func() bool { return w.Title() == "acat (1)" })
+	waitFor(t, "jane on top", func() bool {
+		txt := allText(list)
+		i, j := strings.Index(txt, "Jane Roe: Ping from Jane"), strings.Index(txt, "Project acat")
+		return i >= 0 && j > i
+	})
+
+	// Looking at Jane's chat: no notification, stays read.
+	fyne.DoAndWait(func() { list.Select(0) })
+	waitFor(t, "read again", func() bool { return w.Title() == "acat" })
+	fyne.DoAndWait(func() {
+		test.AssertNotificationSent(t, nil, func() { accts.Push("Second ping") })
+	})
+	waitFor(t, "second message visible", func() bool { return strings.Contains(allText(w.Content()), "Second ping") })
+	if w.Title() != "acat" {
+		t.Fatalf("title %q", w.Title())
+	}
 }

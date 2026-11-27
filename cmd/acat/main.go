@@ -64,5 +64,5 @@ func accounts(demoMode bool) (ui.Accounts, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w\nSet ACAT_CLIENT_ID or client_id in the config file, or run 'acat -demo'", err)
 	}
-	return newMSALAccounts(m), nil
+	return newMSALAccounts(m, cfg.RelayURL), nil
 }

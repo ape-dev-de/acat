@@ -2,25 +2,31 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ape-dev-de/acat/internal/auth"
 	"github.com/ape-dev-de/acat/internal/graph"
+	"github.com/ape-dev-de/acat/internal/relayc"
+	"github.com/ape-dev-de/acat/internal/subs"
 	"github.com/ape-dev-de/acat/internal/ui"
+	"github.com/ape-dev-de/acat/internal/version"
 )
 
 // msalAccounts adapts auth.Manager + graph.Client to ui.Accounts.
 type msalAccounts struct {
-	m *auth.Manager
+	m        *auth.Manager
+	relayURL string
 
 	mu   sync.Mutex
 	byID map[string]auth.Account
 	apis map[string]*graph.Client
 }
 
-func newMSALAccounts(m *auth.Manager) *msalAccounts {
-	return &msalAccounts{m: m, byID: map[string]auth.Account{}, apis: map[string]*graph.Client{}}
+func newMSALAccounts(m *auth.Manager, relayURL string) *msalAccounts {
+	return &msalAccounts{m: m, relayURL: relayURL, byID: map[string]auth.Account{}, apis: map[string]*graph.Client{}}
 }
 
 func info(a auth.Account) ui.AccountInfo {
@@ -80,4 +86,29 @@ func (x *msalAccounts) API(id string) ui.ChatAPI {
 	c := graph.New(graph.TokenFunc(x.m.GraphToken(a)))
 	x.apis[id] = c
 	return c
+}
+
+// StartLive implements ui.LiveSource: relay connection + Graph subscription.
+func (x *msalAccounts) StartLive(ctx context.Context, accountID, userID string, h ui.LiveHandler) (func(), error) {
+	if x.relayURL == "" {
+		return nil, errors.New("no relay configured (set relay_url in the config file or ACAT_RELAY_URL)")
+	}
+	api, ok := x.API(accountID).(*graph.Client)
+	if !ok {
+		return nil, errors.New("unknown account")
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	events := make(chan relayc.Event, 64)
+	rc := relayc.New(x.relayURL, "acat/"+version.Version)
+	mgr := subs.New(subs.Config{RelayURL: x.relayURL, UserID: userID}, api, h)
+	done := make(chan struct{})
+	go func() { _ = rc.Run(ctx, events) }()
+	go func() { mgr.Run(ctx, events); close(done) }()
+	return func() {
+		cancel()
+		select { // the manager deletes the subscription (max 10 s)
+		case <-done:
+		case <-time.After(12 * time.Second):
+		}
+	}, nil
 }

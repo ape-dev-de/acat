@@ -26,6 +26,11 @@ type Accounts struct {
 	mu       sync.Mutex
 	accounts []ui.AccountInfo
 	api      *API
+	live     ui.LiveHandler
+
+	// LiveInterval is how often a message from Jane is simulated
+	// (0 = only via Push). Set before the UI starts.
+	LiveInterval time.Duration
 }
 
 // NewAccounts returns demo accounts.
@@ -33,6 +38,8 @@ func NewAccounts() *Accounts {
 	return &Accounts{
 		accounts: []ui.AccountInfo{{ID: "demo-account", Username: "you@contoso.example", TenantID: "contoso"}},
 		api:      NewAPI(time.Now()),
+
+		LiveInterval: 45 * time.Second,
 	}
 }
 
@@ -308,3 +315,73 @@ func (a *API) SearchUsers(_ context.Context, query string, _ int) ([]graph.User,
 
 // MarkChatRead implements ui.ChatAPI.
 func (a *API) MarkChatRead(context.Context, string, string, string) error { return nil }
+
+// GetMessage implements ui.ChatAPI.
+func (a *API) GetMessage(_ context.Context, chatID, messageID string) (graph.Message, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, m := range a.messages[chatID] {
+		if m.ID == messageID {
+			return m, nil
+		}
+	}
+	return graph.Message{}, &graph.Error{Status: 404, Code: "NotFound"}
+}
+
+// Incoming simulates a message from Jane arriving in the 1:1 chat and
+// returns its chat and message ID.
+func (a *API) Incoming(text string) (chatID, messageID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.nextID++
+	chatID = "19:demo-jane@unq.gbl.spaces"
+	now := time.Now().UTC()
+	m := graph.Message{
+		ID: "in" + strconv.Itoa(a.nextID), ChatID: chatID, MessageType: graph.MessageTypeMessage,
+		CreatedDateTime: now, LastModifiedDateTime: now,
+		From: &graph.IdentitySet{User: &graph.Identity{ID: janeID, DisplayName: "Jane Roe"}},
+		Body: graph.ItemBody{ContentType: graph.ContentHTML, Content: "<p>" + text + "</p>"},
+	}
+	a.messages[chatID] = append([]graph.Message{m}, a.messages[chatID]...)
+	return chatID, m.ID
+}
+
+// StartLive implements ui.LiveSource with simulated incoming messages.
+func (a *Accounts) StartLive(ctx context.Context, _ string, _ string, h ui.LiveHandler) (func(), error) {
+	ctx, cancel := context.WithCancel(ctx)
+	a.mu.Lock()
+	a.live = h
+	interval := a.LiveInterval
+	a.mu.Unlock()
+	h.OnState(true, nil)
+	if interval > 0 {
+		go func() {
+			t := time.NewTicker(interval)
+			defer t.Stop()
+			n := 0
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					n++
+					chatID, msgID := a.api.Incoming(fmt.Sprintf("Simulated live message #%d", n))
+					h.OnMessage(chatID, msgID, "created")
+				}
+			}
+		}()
+	}
+	return cancel, nil
+}
+
+// Push simulates one incoming message now (used by tests).
+func (a *Accounts) Push(text string) {
+	a.mu.Lock()
+	h := a.live
+	a.mu.Unlock()
+	if h == nil {
+		return
+	}
+	chatID, msgID := a.api.Incoming(text)
+	h.OnMessage(chatID, msgID, "created")
+}
