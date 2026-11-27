@@ -9,6 +9,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/ape-dev-de/acat/internal/demo"
@@ -94,6 +95,9 @@ func TestDemoFlow(t *testing.T) {
 }
 
 func walk(o fyne.CanvasObject, fn func(fyne.CanvasObject)) {
+	if !o.Visible() {
+		return
+	}
 	fn(o)
 	switch x := o.(type) {
 	case *fyne.Container:
@@ -212,5 +216,72 @@ func TestLiveIncomingMessage(t *testing.T) {
 	waitFor(t, "second message visible", func() bool { return strings.Contains(allText(w.Content()), "Second ping") })
 	if w.Title() != "acat" {
 		t.Fatalf("title %q", w.Title())
+	}
+}
+
+func TestCalls(t *testing.T) {
+	a := test.NewTempApp(t)
+	accts := demo.NewAccounts()
+	accts.LiveInterval = 0
+	calls := accts.FakeCalls()
+	u := ui.New(context.Background(), a, accts)
+	u.SetSynchronous()
+	w := u.Window()
+	w.Show()
+	u.Start()
+	list := findList(t, w.Content())
+	waitFor(t, "chat list", func() bool { return list.Length() == 3 })
+
+	// Outgoing call from the group chat: all members except me.
+	fyne.DoAndWait(func() { list.Select(0) })
+	waitFor(t, "group open", func() bool { return strings.Contains(allText(w.Content()), "Standup now") })
+	var callBtn *widget.Button
+	walk(w.Content(), func(o fyne.CanvasObject) {
+		if b, ok := o.(*widget.Button); ok && b.Icon != nil && b.Icon.Name() == theme.MediaRecordIcon().Name() && callBtn == nil {
+			callBtn = b
+		}
+	})
+	if callBtn == nil || callBtn.Disabled() {
+		t.Fatal("call button missing or disabled")
+	}
+	fyne.DoAndWait(func() { test.Tap(callBtn) })
+	waitFor(t, "call bar connected", func() bool { return strings.Contains(allText(w.Content()), "Call · Project acat · Connected") })
+	if len(calls.Log) != 1 || !strings.Contains(calls.Log[0], "00000000-0000-0000-0000-00000000000b") || strings.Contains(calls.Log[0], "00000000000a") {
+		t.Fatalf("call log %v", calls.Log)
+	}
+	if !calls.Visible || !callBtn.Disabled() {
+		t.Fatal("call window should be shown and call buttons disabled during a call")
+	}
+
+	// Hang up via call bar.
+	fyne.DoAndWait(func() { test.Tap(findButton(t, w.Content(), "Hang up")) })
+	waitFor(t, "call ended", func() bool { return !strings.Contains(allText(w.Content()), "Call · ") })
+	if calls.Visible {
+		t.Fatal("call window should be hidden after hang-up")
+	}
+
+	// Meeting link in a message → Join meeting.
+	fyne.DoAndWait(func() { test.Tap(findButton(t, w.Content(), "Join meeting")) })
+	waitFor(t, "meeting joined", func() bool { return strings.Contains(allText(w.Content()), "Call · Meeting · Connected") })
+	if !strings.HasPrefix(calls.Log[len(calls.Log)-1], "join https://teams.microsoft.com/l/meetup-join/") {
+		t.Fatalf("log %v", calls.Log)
+	}
+	fyne.DoAndWait(func() { test.Tap(findButton(t, w.Content(), "Hang up")) })
+
+	// Incoming call → dialog → accept.
+	var id string
+	fyne.DoAndWait(func() {
+		test.AssertNotificationSent(t, &fyne.Notification{Title: "Incoming call", Content: "Jane Roe is calling"}, func() {
+			id = calls.RingFromJane()
+		})
+	})
+	overlay := w.Canvas().Overlays().Top()
+	if overlay == nil {
+		t.Fatal("no incoming call dialog")
+	}
+	fyne.DoAndWait(func() { test.Tap(findButton(t, overlay, "Accept")) })
+	waitFor(t, "accepted", func() bool { return strings.Contains(allText(w.Content()), "Call · Jane Roe · Connected") })
+	if calls.Log[len(calls.Log)-1] != "accept "+id {
+		t.Fatalf("log %v", calls.Log)
 	}
 }

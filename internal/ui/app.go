@@ -67,6 +67,7 @@ type session struct {
 	presence     map[string]graph.Presence
 	stopPresence func()
 	statusLabel  string
+	calls        Calls
 }
 
 // UI is the main window.
@@ -94,11 +95,18 @@ type UI struct {
 	newChat       *widget.Button
 	chatList      *widget.List
 	composer      *composer
-	header        *widget.Label
-	olderBtn      *widget.Button
-	msgBox        *fyne.Container
-	msgScroll     *container.Scroll
-	status        *widget.Label
+	callAudio     *widget.Button
+	callVideo     *widget.Button
+	callLabel     *widget.Label
+	callBar       *fyne.Container
+
+	activeCall       *callState
+	callsUnavailable string
+	header           *widget.Label
+	olderBtn         *widget.Button
+	msgBox           *fyne.Container
+	msgScroll        *container.Scroll
+	status           *widget.Label
 }
 
 // New builds the main window. Call Start to load accounts, then
@@ -162,6 +170,7 @@ func New(ctx context.Context, app fyne.App, accts Accounts) *UI {
 	u.msgScroll = container.NewVScroll(u.msgBox)
 	u.newChat = widget.NewButtonWithIcon("New chat", theme.DocumentCreateIcon(), u.showNewChat)
 	u.newChat.Disable()
+	u.buildCallUI()
 	u.composer = newComposer(u)
 	u.composer.setEnabled(false)
 	u.status = widget.NewLabel("")
@@ -169,8 +178,9 @@ func New(ctx context.Context, app fyne.App, accts Accounts) *UI {
 	u.status.Wrapping = fyne.TextWrapWord
 
 	top := container.NewBorder(nil, nil, nil, container.NewHBox(u.statusSelect, u.addAccount, u.signOut), u.accountSelect)
+	headerRow := container.NewBorder(nil, nil, nil, container.NewHBox(u.callAudio, u.callVideo), u.header)
 	right := container.NewBorder(
-		container.NewVBox(u.header, widget.NewSeparator()),
+		container.NewVBox(u.callBar, headerRow, widget.NewSeparator()),
 		u.composer.object(), nil, nil,
 		container.NewBorder(u.olderBtn, nil, nil, nil, u.msgScroll),
 	)
@@ -259,6 +269,7 @@ func (u *UI) switchAccount(a AccountInfo) {
 	if s.store != nil {
 		u.newChat.Enable()
 		u.statusSelect.Enable()
+		u.attachCalls(s)
 		u.refreshChats()
 		return
 	}
@@ -309,6 +320,11 @@ func (u *UI) loadSession(s *session) {
 		st.SetChats(chats) // emits ChatsChanged → refreshChats on main goroutine
 		u.startLive(s)
 		u.startPresence(s)
+		fyne.Do(func() {
+			if u.current == s {
+				u.attachCalls(s)
+			}
+		})
 	}
 }
 
@@ -337,6 +353,7 @@ func (u *UI) openChat(chatID string) {
 	u.header.SetText(c.Title(s.store.Self()))
 	u.composer.reset()
 	u.composer.setEnabled(true)
+	u.updateCallButtons()
 	u.renderMessages(true)
 	if c.Unread(s.store.Self()) {
 		u.markRead(s, c)
@@ -464,7 +481,7 @@ func (u *UI) renderMessages(scrollToEnd bool) {
 	msgs := st.Messages(u.selected)
 	objs := make([]fyne.CanvasObject, 0, len(msgs))
 	for _, m := range msgs {
-		objs = append(objs, newMessageItem(m, st.Self(), u.showMessageMenu))
+		objs = append(objs, newMessageItem(m, st.Self(), u.showMessageMenu, u.joinMeeting))
 	}
 	u.msgBox.Objects = objs
 	u.msgBox.Refresh()
@@ -478,7 +495,17 @@ func (u *UI) renderMessages(scrollToEnd bool) {
 	}
 }
 
-func messageView(m graph.Message, self string) fyne.CanvasObject {
+func messageView(m graph.Message, self string, onJoin func(string)) fyne.CanvasObject {
+	v := messageContent(m, self)
+	if link, ok := meetingLinkOf(m); ok && onJoin != nil {
+		join := widget.NewButtonWithIcon("Join meeting", theme.MediaVideoIcon(), func() { onJoin(link) })
+		join.Importance = widget.HighImportance
+		return container.NewVBox(v, container.NewHBox(join))
+	}
+	return v
+}
+
+func messageContent(m graph.Message, self string) fyne.CanvasObject {
 	if m.MessageType != "" && m.MessageType != graph.MessageTypeMessage {
 		l := widget.NewLabelWithStyle(systemText(m), fyne.TextAlignCenter, fyne.TextStyle{Italic: true})
 		l.Importance = widget.LowImportance
@@ -501,11 +528,13 @@ func messageView(m graph.Message, self string) fyne.CanvasObject {
 		body = widget.NewRichText(&widget.TextSegment{Text: "This message was deleted.",
 			Style: widget.RichTextStyle{TextStyle: fyne.TextStyle{Italic: true}, ColorName: theme.ColorNameDisabled}})
 	} else {
-		body = widget.NewRichText(segments(render.Body(m.Body.ContentType, m.Body.Content), m.Attachments)...)
+		body = widget.NewRichText(segments(bodyDoc(m), m.Attachments)...)
 	}
 	body.Wrapping = fyne.TextWrapWord
 	return container.NewVBox(head, body)
 }
+
+func bodyDoc(m graph.Message) render.Doc { return render.Body(m.Body.ContentType, m.Body.Content) }
 
 func systemText(m graph.Message) string {
 	if t := render.Body(m.Body.ContentType, m.Body.Content).PlainText(); t != "" {

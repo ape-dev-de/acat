@@ -42,6 +42,9 @@ func main() {
 	u := ui.New(ctx, a, accts)
 	u.Start()
 	u.Window().ShowAndRun()
+	if s, ok := accts.(interface{ StopCalls() }); ok {
+		s.StopCalls()
+	}
 }
 
 func accounts(demoMode bool) (ui.Accounts, error) {

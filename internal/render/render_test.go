@@ -185,3 +185,17 @@ func FuzzHTML(f *testing.F) {
 		}
 	})
 }
+
+func TestMeetingLink(t *testing.T) {
+	d := HTML(`<p>see <a href="https://example.org">x</a> and <a href="https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=%7b%7d">Join</a></p>`)
+	l, ok := d.MeetingLink()
+	if !ok || !strings.HasPrefix(l, "https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc") {
+		t.Fatalf("%q %v", l, ok)
+	}
+	if len(d.Links()) != 2 {
+		t.Fatal("links")
+	}
+	if _, ok := HTML(`<a href="https://teams.microsoft.com.evil.example/l/meetup-join/x">x</a>`).MeetingLink(); ok {
+		t.Fatal("look-alike host accepted")
+	}
+}

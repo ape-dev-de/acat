@@ -100,10 +100,14 @@ func (u *UI) showMessageMenu(m graph.Message, pos fyne.Position) {
 	if u.current == nil || u.current.store == nil || m.IsDeleted() || m.MessageType != graph.MessageTypeMessage {
 		return
 	}
-	items := []*fyne.MenuItem{
+	items := []*fyne.MenuItem{}
+	if link, ok := meetingLinkOf(m); ok {
+		items = append(items, fyne.NewMenuItem("Join meeting", func() { u.joinMeeting(link) }), fyne.NewMenuItemSeparator())
+	}
+	items = append(items,
 		fyne.NewMenuItem("Reply with quote", func() { u.composer.reply(m) }),
 		fyne.NewMenuItem("Copy text", func() { u.app.Clipboard().SetContent(plainBody(m)) }),
-	}
+	)
 	if m.From.UserID() == u.current.store.Self() {
 		items = append(items,
 			fyne.NewMenuItemSeparator(),
@@ -127,8 +131,8 @@ type messageItem struct {
 	onMenu  func(graph.Message, fyne.Position)
 }
 
-func newMessageItem(m graph.Message, self string, onMenu func(graph.Message, fyne.Position)) *messageItem {
-	it := &messageItem{msg: m, content: messageView(m, self), onMenu: onMenu}
+func newMessageItem(m graph.Message, self string, onMenu func(graph.Message, fyne.Position), onJoin func(string)) *messageItem {
+	it := &messageItem{msg: m, content: messageView(m, self, onJoin), onMenu: onMenu}
 	it.ExtendBaseWidget(it)
 	return it
 }

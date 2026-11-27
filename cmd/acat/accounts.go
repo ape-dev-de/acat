@@ -20,13 +20,15 @@ type msalAccounts struct {
 	m        *auth.Manager
 	relayURL string
 
-	mu   sync.Mutex
-	byID map[string]auth.Account
-	apis map[string]*graph.Client
+	mu        sync.Mutex
+	byID      map[string]auth.Account
+	apis      map[string]*graph.Client
+	calls     map[string]*helperCalls
+	stopCalls []context.CancelFunc
 }
 
 func newMSALAccounts(m *auth.Manager, relayURL string) *msalAccounts {
-	return &msalAccounts{m: m, relayURL: relayURL, byID: map[string]auth.Account{}, apis: map[string]*graph.Client{}}
+	return &msalAccounts{m: m, relayURL: relayURL, byID: map[string]auth.Account{}, apis: map[string]*graph.Client{}, calls: map[string]*helperCalls{}}
 }
 
 func info(a auth.Account) ui.AccountInfo {

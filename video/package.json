@@ -1,0 +1,21 @@
+{
+  "name": "acat-video",
+  "private": true,
+  "version": "0.1.0",
+  "description": "acat video helper: hidden, hardened Electron + Azure Communication Services Calling SDK",
+  "license": "Apache-2.0",
+  "main": "src/main.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "npm run build && electron .",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@azure/communication-calling": "2.0.0",
+    "@azure/communication-common": "2.5.0"
+  },
+  "devDependencies": {
+    "electron": "45.5.0",
+    "esbuild": "0.28.2"
+  }
+}

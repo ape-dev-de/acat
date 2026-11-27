@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob: mediastream:; connect-src https: wss:; worker-src 'self' blob:;">
+  <title>acat call</title>
+  <link rel="stylesheet" href="call.css">
+</head>
+<body>
+  <main>
+    <section id="remote" aria-label="Remote video"></section>
+    <aside id="local" aria-label="Your video"></aside>
+    <div id="status" role="status"></div>
+  </main>
+  <nav id="controls">
+    <button id="btn-mute" type="button" title="Mute">Mute</button>
+    <button id="btn-camera" type="button" title="Camera">Camera</button>
+    <button id="btn-share" type="button" title="Share screen">Share</button>
+    <button id="btn-hangup" type="button" class="danger" title="Hang up">Hang up</button>
+  </nav>
+  <script src="call.bundle.js"></script>
+</body>
+</html>

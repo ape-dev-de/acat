@@ -54,6 +54,20 @@ See [self-hosting.md](self-hosting.md).
 
 Defaults can be compiled in for your own builds; users can override them.
 
+## 5. Video helper (development)
+
+Calls run in a separate helper (`video/`, Electron + ACS Calling SDK). Packaged builds ship it next to the binary. For a dev checkout:
+
+```sh
+make video                      # npm ci + bundle
+export ACAT_VIDEO_HELPER="$PWD/video/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"  # macOS
+# Linux: $PWD/video/node_modules/electron/dist/electron   Windows: …\electron.exe
+export ACAT_VIDEO_APP="$PWD/video"
+go run ./cmd/acat
+```
+
+Without a helper (or without a relay offering `acs-token`), the call buttons stay disabled. The first call asks for consent to the Teams calling permissions (a separate resource).
+
 ## Test tenants (development)
 
 Integration tests (`make test-integration`) read `ACAT_TEST_TENANT_A`, `ACAT_TEST_TENANT_B` and `ACAT_CLIENT_ID` from the environment. Never commit them.

@@ -13,6 +13,7 @@ import (
 
 	"github.com/ape-dev-de/acat/internal/graph"
 	"github.com/ape-dev-de/acat/internal/ui"
+	"github.com/ape-dev-de/acat/pkg/protocol"
 )
 
 const (
@@ -27,6 +28,7 @@ type Accounts struct {
 	accounts []ui.AccountInfo
 	api      *API
 	live     ui.LiveHandler
+	calls    *Calls
 
 	// LiveInterval is how often a message from Jane is simulated
 	// (0 = only via Push). Set before the UI starts.
@@ -139,6 +141,7 @@ func NewAPI(now time.Time) *API {
 		graph.Message{ID: "g91", CreatedDateTime: at(20 * time.Minute), From: jane, LastEditedDateTime: &edited, Body: html(`<p>Sure, see <attachment id="att1"></attachment></p>`),
 			Attachments: []graph.Attachment{{ID: "att1", ContentType: "reference", Name: "review-notes.docx"}}},
 		graph.Message{ID: "g92", CreatedDateTime: at(6 * time.Minute), From: me, DeletedDateTime: &deleted},
+		graph.Message{ID: "g93", CreatedDateTime: at(4 * time.Minute), From: tom, Body: html(`<p>Standup now: <a href="https://teams.microsoft.com/l/meetup-join/19%3ameeting_demo%40thread.v2/0">Join Microsoft Teams Meeting</a></p>`)},
 	)
 	add(team, older...)
 
@@ -405,3 +408,105 @@ func (a *API) SetPreferredPresence(context.Context, string, graph.PreferredPrese
 
 // ClearPreferredPresence implements ui.ChatAPI.
 func (a *API) ClearPreferredPresence(context.Context, string) error { return nil }
+
+// Calls is a fake calling backend: calls connect immediately, and
+// RingFromJane simulates an incoming call.
+type Calls struct {
+	mu      sync.Mutex
+	handler func(protocol.VideoEvent)
+	n       int
+	Visible bool
+	Log     []string // commands received, for tests
+}
+
+// Calls implements ui.CallSource.
+func (a *Accounts) Calls(string) (ui.Calls, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.calls == nil {
+		a.calls = &Calls{}
+	}
+	return a.calls, nil
+}
+
+// FakeCalls returns the demo calling backend (for tests).
+func (a *Accounts) FakeCalls() *Calls {
+	c, _ := a.Calls("")
+	return c.(*Calls)
+}
+
+func (c *Calls) emit(ev protocol.VideoEvent) {
+	c.mu.Lock()
+	h := c.handler
+	c.mu.Unlock()
+	if h != nil {
+		h(ev)
+	}
+}
+
+func (c *Calls) log(s string) {
+	c.mu.Lock()
+	c.Log = append(c.Log, s)
+	c.mu.Unlock()
+}
+
+func (c *Calls) nextID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n++
+	return "demo-call-" + strconv.Itoa(c.n)
+}
+
+// OnEvent implements ui.Calls.
+func (c *Calls) OnEvent(h func(protocol.VideoEvent)) {
+	c.mu.Lock()
+	c.handler = h
+	c.mu.Unlock()
+}
+
+// Call implements ui.Calls.
+func (c *Calls) Call(participants []string, video bool) error {
+	id := c.nextID()
+	c.log(fmt.Sprintf("call %s video=%v", strings.Join(participants, ","), video))
+	c.emit(protocol.VideoEvent{Type: protocol.VideoCallState, CallID: id, State: protocol.CallConnecting})
+	c.emit(protocol.VideoEvent{Type: protocol.VideoCallState, CallID: id, State: protocol.CallConnected})
+	return nil
+}
+
+// Join implements ui.Calls.
+func (c *Calls) Join(link string, video bool) error {
+	id := c.nextID()
+	c.log("join " + link)
+	c.emit(protocol.VideoEvent{Type: protocol.VideoCallState, CallID: id, State: protocol.CallConnected})
+	return nil
+}
+
+// Accept implements ui.Calls.
+func (c *Calls) Accept(callID string, video bool) error {
+	c.log("accept " + callID)
+	c.emit(protocol.VideoEvent{Type: protocol.VideoCallState, CallID: callID, State: protocol.CallConnected})
+	return nil
+}
+
+// Reject implements ui.Calls.
+func (c *Calls) Reject(callID string) error { c.log("reject " + callID); return nil }
+
+// Hangup implements ui.Calls.
+func (c *Calls) Hangup(callID string) error {
+	c.log("hangup " + callID)
+	c.emit(protocol.VideoEvent{Type: protocol.VideoCallState, CallID: callID, State: protocol.CallDisconnected})
+	return nil
+}
+
+// Show implements ui.Calls.
+func (c *Calls) Show() error { c.mu.Lock(); c.Visible = true; c.mu.Unlock(); return nil }
+
+// Hide implements ui.Calls.
+func (c *Calls) Hide() error { c.mu.Lock(); c.Visible = false; c.mu.Unlock(); return nil }
+
+// RingFromJane simulates an incoming call and returns its ID.
+func (c *Calls) RingFromJane() string {
+	id := c.nextID()
+	c.emit(protocol.VideoEvent{Type: protocol.VideoIncomingCall, CallID: id, Caller: &protocol.Caller{ID: janeID, DisplayName: "Jane Roe"}})
+	return id
+}

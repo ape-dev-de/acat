@@ -443,3 +443,34 @@ func (d Doc) PlainText() string {
 	}
 	return sb.String()
 }
+
+// Links returns all link targets in the document, in order.
+func (d Doc) Links() []string {
+	var out []string
+	for _, b := range d.Blocks {
+		for _, in := range b.Inlines {
+			if in.Kind == KindLink {
+				out = append(out, in.Href)
+			}
+		}
+	}
+	return out
+}
+
+// IsMeetingLink reports whether u is a Teams meeting join link.
+func IsMeetingLink(u string) bool {
+	l := strings.ToLower(u)
+	return (strings.HasPrefix(l, "https://teams.microsoft.com/l/meetup-join/") ||
+		strings.HasPrefix(l, "https://teams.live.com/meet/") ||
+		strings.HasPrefix(l, "https://teams.microsoft.com/meet/"))
+}
+
+// MeetingLink returns the first Teams meeting link in the document.
+func (d Doc) MeetingLink() (string, bool) {
+	for _, l := range d.Links() {
+		if IsMeetingLink(l) {
+			return l, true
+		}
+	}
+	return "", false
+}

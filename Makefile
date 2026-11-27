@@ -5,7 +5,7 @@ PKG     := github.com/ape-dev-de/acat/internal/version
 LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE)
 BIN     := bin
 
-.PHONY: all build client relay demo snapshot test test-integration lint vuln fmt tidy docker-relay clean
+.PHONY: all build client relay demo snapshot video video-test test-electron test test-integration lint vuln fmt tidy docker-relay clean
 
 all: build test lint
 
@@ -23,6 +23,16 @@ demo: client
 # Render the demo UI to a PNG (headless): make snapshot OUT=/tmp/acat.png
 snapshot:
 	ACAT_SNAPSHOT=$(abspath $(or $(OUT),bin/snapshot.png)) go test -count=1 -run TestSnapshot ./internal/ui/
+
+video:
+	cd video && npm ci && npm run build
+
+video-test:
+	cd video && npm test
+
+# Real Electron helper end-to-end (after 'make video').
+test-electron:
+	go test -tags electron -count=1 ./internal/video/
 
 test:
 	go test -race -count=1 ./...
