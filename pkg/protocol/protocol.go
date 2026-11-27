@@ -4,9 +4,11 @@
 // Compatibility rule (see docs/protocol.md): the relay supports protocol
 // version N and N-1. New functionality is added as named features
 // announced in Welcome.Features; only breaking changes bump the version.
+// Receivers must ignore unknown fields and features.
 package protocol
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -24,12 +26,21 @@ const VideoVersion = 1
 
 // Message types on the relay WebSocket.
 const (
-	TypeHello        = "hello"
-	TypeWelcome      = "welcome"
-	TypeNotification = "notification"
-	TypeLifecycle    = "lifecycle"
-	TypeError        = "error"
+	TypeHello        = "hello"        // client → relay, first frame
+	TypeWelcome      = "welcome"      // relay → client, answer to hello
+	TypeNotification = "notification" // relay → client, Graph change notification
+	TypeLifecycle    = "lifecycle"    // relay → client, Graph lifecycle notification
+	TypeError        = "error"        // relay → client, followed by close
 )
+
+// Error codes in Error.Code.
+const (
+	ErrCodeUnsupportedVersion = "unsupported_version"
+	ErrCodeTooManyConnections = "too_many_connections"
+)
+
+// CloseSlowConsumer is the close reason when a client cannot keep up.
+const CloseSlowConsumer = "slow consumer"
 
 // Hello is the first frame a client sends after the WebSocket is open.
 type Hello struct {
@@ -44,6 +55,25 @@ type Welcome struct {
 	Proto        int      `json:"proto"`        // negotiated protocol version
 	RoutingToken string   `json:"routingToken"` // random, valid for this connection only
 	Features     []string `json:"features,omitempty"`
+}
+
+// Push carries a Graph webhook body (TypeNotification or TypeLifecycle)
+// unchanged. Graph notifications without resource data contain IDs only.
+type Push struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// Error is sent before the relay closes a connection on purpose.
+type Error struct {
+	Type    string `json:"type"` // always TypeError
+	Code    string `json:"code"`
+	Message string `json:"message,omitempty"`
+}
+
+// Envelope is used to peek at the type of an incoming frame.
+type Envelope struct {
+	Type string `json:"type"`
 }
 
 // ErrUnsupportedVersion is returned when no common protocol version exists.

@@ -6,7 +6,12 @@ Types and version constants live in [`pkg/protocol`](../pkg/protocol). They are 
 
 1. Client opens the WebSocket and sends `{"type":"hello","proto":<max>,"client":"acat/<version>"}`.
 2. Relay answers `{"type":"welcome","proto":<negotiated>,"routingToken":"…","features":[…]}` or closes with an `error` frame if no common version exists.
-3. Relay pushes `notification` and `lifecycle` frames (Graph payloads, IDs only, no content).
+3. Relay pushes `{"type":"notification"|"lifecycle","payload":<Graph webhook body, unchanged>}` frames. Subscriptions are created without resource data, so payloads contain IDs only.
+4. In v1 the client sends **nothing** after `hello`; any data frame closes the connection. Keepalive uses WebSocket pings (every 30 s).
+
+Close codes: `1001 going away` (relay shutdown, reconnect), `1008 policy violation` (no/invalid hello, unsupported version, slow consumer), `1013 try again later` (too many connections from the address). Hello must arrive within 10 s.
+
+The routing token (192 bit, base64url) is valid only for this connection. After a reconnect the client gets a new one and must re-point its Graph subscriptions (`PATCH notificationUrl`).
 
 ### Compatibility rules
 - The relay supports protocol version **N and N-1** (`RelayMinVersion >= RelayVersion-1`, enforced by a unit test).

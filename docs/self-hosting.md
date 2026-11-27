@@ -21,7 +21,17 @@ Run the image `ghcr.io/ape-dev-de/acat-relay` with `ACAT_TLS_MODE=proxy` and rou
 
 ## Option C: relay terminates TLS itself
 
-`ACAT_TLS_MODE=autocert ACAT_DOMAIN=relay.example.org`, ports 80 and 443 open. The certificate cache is the only file the relay writes.
+`ACAT_TLS_MODE=autocert ACAT_DOMAIN=relay.example.org`, ports 80 and 443 open, a volume mounted at `ACAT_CERT_DIR` (default `/certs`). The certificate cache is the only file the relay writes.
+
+## Metrics
+
+Set `ACAT_METRICS_ADDR` (e.g. `:9090`) to serve Prometheus metrics on a **separate** listener; do not expose it publicly. Only aggregate counters exist: open connections, accepted/rejected connections, validations, forwarded and dropped notifications by fixed reason.
+
+## Behaviour worth knowing
+
+- Webhooks are always answered `202`, even for unknown routing tokens (no token oracle). Unknown tokens are counted and dropped.
+- A client that cannot keep up (send queue full) is disconnected; it reconnects and resyncs via Graph.
+- On `SIGTERM` all WebSockets get a "going away" close, so clients reconnect immediately after a restart. No state survives a restart.
 
 ## Environment
 

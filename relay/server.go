@@ -1,72 +1,66 @@
 // Package relay implements acat-relay: a stateless, zero-knowledge bridge
 // from Microsoft Graph webhooks to client WebSocket connections.
 //
-// M0 only provides configuration and health endpoints; hook, lifecycle, ws
-// and acs routes follow in M5/M8 (see docs/plan.md).
+// Routes:
+//
+//	/hook       Graph change notifications (?r=<routingToken>)
+//	/lifecycle  Graph lifecycle notifications (?r=<routingToken>)
+//	/ws         client WebSocket (hello → welcome{routingToken} → push frames)
+//	/healthz    liveness
+//
+// Metrics are served on a separate listener (Config.MetricsAddr).
+//
+// The relay keeps no state except routingToken → connection, in memory.
+// It never logs request bodies, IDs, tokens or query strings.
 package relay
 
 import (
-	"errors"
-	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 )
 
-// TLS modes.
-const (
-	TLSModeProxy    = "proxy"    // plain HTTP behind a reverse proxy
-	TLSModeAutocert = "autocert" // terminate TLS via Let's Encrypt
-)
-
-// Config is read exclusively from environment variables.
-type Config struct {
-	ListenAddr string // ACAT_LISTEN_ADDR, default ":8080"
-	TLSMode    string // ACAT_TLS_MODE, default "proxy"
-	Domain     string // ACAT_DOMAIN, required for autocert
-}
-
-// ConfigFromEnv builds a Config from a getenv function (os.Getenv in prod).
-func ConfigFromEnv(getenv func(string) string) (Config, error) {
-	c := Config{
-		ListenAddr: getenv("ACAT_LISTEN_ADDR"),
-		TLSMode:    getenv("ACAT_TLS_MODE"),
-		Domain:     getenv("ACAT_DOMAIN"),
-	}
-	if c.ListenAddr == "" {
-		c.ListenAddr = ":8080"
-	}
-	if c.TLSMode == "" {
-		c.TLSMode = TLSModeProxy
-	}
-	switch c.TLSMode {
-	case TLSModeProxy:
-	case TLSModeAutocert:
-		if c.Domain == "" {
-			return c, errors.New("ACAT_DOMAIN is required when ACAT_TLS_MODE=autocert")
-		}
-	default:
-		return c, fmt.Errorf("unknown ACAT_TLS_MODE %q (want %q or %q)", c.TLSMode, TLSModeProxy, TLSModeAutocert)
-	}
-	return c, nil
-}
-
 // Server holds relay state. All state lives in memory only.
 type Server struct {
-	cfg Config
-	log *slog.Logger
+	cfg        Config
+	log        *slog.Logger
+	hub        *hub
+	m          *metrics
+	connectLim *keyedLimiter
+	features   []string
 }
 
-// NewServer creates a relay server.
+// NewServer creates a relay server. log may be nil.
 func NewServer(cfg Config, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, log: log}
+	if log == nil {
+		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	return &Server{
+		cfg:        cfg,
+		log:        log,
+		hub:        newHub(cfg.MaxConnsPerIP),
+		m:          newMetrics(),
+		connectLim: newKeyedLimiter(cfg.WSConnectRate, cfg.WSConnectBurst),
+	}
 }
 
-// Handler returns the HTTP routes.
+// Handler returns the public HTTP routes.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/hook", s.hookHandler(kindNotification))
+	mux.HandleFunc("/lifecycle", s.hookHandler(kindLifecycle))
+	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	return mux
 }
+
+// MetricsHandler returns the Prometheus endpoint (serve it privately).
+func (s *Server) MetricsHandler() http.Handler { return s.m.handler() }
+
+// Shutdown closes all client connections so clients reconnect elsewhere or
+// after the restart. http.Server.Shutdown does not touch hijacked
+// WebSocket connections, so call this from RegisterOnShutdown.
+func (s *Server) Shutdown() { s.hub.kickAll("server shutdown") }

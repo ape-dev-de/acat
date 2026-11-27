@@ -153,7 +153,7 @@ Regeln für die Umsetzung:
 ### M5 – Relay-Server (Zero Knowledge)
 - `GET/POST /hook` und `/lifecycle`: `validationToken` als `text/plain` zurück (< 10 s). Benachrichtigungen per `?r=` an die WS weiterleiten, **sofort `202`**, auch bei unbekanntem Token (verwerfen, damit kein Orakel entsteht).
 - `/ws`: `hello`/`welcome`-Handshake (§2 Versionierung), Token ≥ 128 bit aus `crypto/rand`, Ping/Pong, Token beim Trennen verwerfen, Backpressure (langsame Clients werden getrennt).
-- Keine Persistenz, keine Logs mit Bodies/IDs/Tokens; nur Zähler unter `/metrics` (Prometheus). Body-Limit (z. B. 64 KB), Rate-Limit pro IP, Limit gleichzeitiger WS pro IP.
+- Keine Persistenz, keine Logs mit Bodies/IDs/Tokens; nur Zähler unter `/metrics` (Prometheus, auf separatem, nicht öffentlichem Listener `ACAT_METRICS_ADDR`). Body-Limit (z. B. 64 KB), Rate-Limit pro IP, Limit gleichzeitiger WS pro IP.
 - TLS: `autocert` **oder** `proxy` (§3). Konfiguration nur über Env.
 - Dockerfile (distroless, non-root), `deploy/docker-compose.yml` mit Caddy.
 
