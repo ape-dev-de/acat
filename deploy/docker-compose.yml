@@ -1,0 +1,27 @@
+# Relay behind Caddy (automatic HTTPS). Usage:
+#   cp deploy/relay.env.example deploy/relay.env   # fill in values
+#   ACAT_DOMAIN=relay.example.org docker compose -f deploy/docker-compose.yml up -d
+services:
+  relay:
+    image: ghcr.io/ape-dev-de/acat-relay:latest
+    restart: unless-stopped
+    env_file: relay.env
+    environment:
+      ACAT_TLS_MODE: proxy
+      ACAT_LISTEN_ADDR: ":8080"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      ACAT_DOMAIN: ${ACAT_DOMAIN:?set ACAT_DOMAIN}
+    command: caddy reverse-proxy --from ${ACAT_DOMAIN} --to relay:8080
+    volumes:
+      - caddy_data:/data
+
+volumes:
+  caddy_data:

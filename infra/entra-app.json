@@ -1,0 +1,35 @@
+{
+  "$comment": "Desired state of the acat Entra app registration. Permissions are listed by value; resolve the scope GUIDs from the resource's service principal (oauth2PermissionScopes) at apply time. See infra/README.md.",
+  "displayName": "acat",
+  "signInAudience": "AzureADMultipleOrgs",
+  "isFallbackPublicClient": true,
+  "publicClient": {
+    "redirectUris": ["http://localhost"]
+  },
+  "requiredResourceAccess": [
+    {
+      "resource": "Microsoft Graph",
+      "resourceAppId": "00000003-0000-0000-c000-000000000000",
+      "delegatedScopes": [
+        "User.Read",
+        "User.ReadBasic.All",
+        "Chat.ReadWrite",
+        "ChatMessage.Send",
+        "Presence.Read.All",
+        "Presence.ReadWrite",
+        "offline_access"
+      ]
+    },
+    {
+      "resource": "Azure Communication Services",
+      "resourceIdentifierUri": "https://auth.msft.communication.azure.com",
+      "delegatedScopes": [
+        "Teams.ManageCalls",
+        "Teams.ManageChats"
+      ]
+    }
+  ],
+  "outputs": {
+    "ACAT_CLIENT_ID": "appId of the registration"
+  }
+}

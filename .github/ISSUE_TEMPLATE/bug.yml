@@ -1,0 +1,19 @@
+name: Bug report
+description: Something does not work
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Do NOT paste tokens, chat IDs or message content.
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: acat version (`acat -version`)
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options: [Windows, macOS, Linux]
