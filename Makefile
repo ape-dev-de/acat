@@ -5,7 +5,7 @@ PKG     := github.com/ape-dev-de/acat/internal/version
 LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE)
 BIN     := bin
 
-.PHONY: all build client relay test test-integration lint vuln fmt tidy docker-relay clean
+.PHONY: all build client relay demo snapshot test test-integration lint vuln fmt tidy docker-relay clean
 
 all: build test lint
 
@@ -16,6 +16,13 @@ client:
 
 relay:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN)/acat-relay ./cmd/acat-relay
+
+demo: client
+	$(BIN)/acat -demo
+
+# Render the demo UI to a PNG (headless): make snapshot OUT=/tmp/acat.png
+snapshot:
+	ACAT_SNAPSHOT=$(abspath $(or $(OUT),bin/snapshot.png)) go test -count=1 -run TestSnapshot ./internal/ui/
 
 test:
 	go test -race -count=1 ./...
