@@ -1,11 +1,13 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.27 AS build
+# Cross-compiles on the build platform (no QEMU for the Go build).
+FROM --platform=$BUILDPLATFORM golang:1.27 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath \
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
       -ldflags "-s -w -X github.com/ape-dev-de/acat/internal/version.Version=${VERSION}" \
       -o /out/acat-relay ./cmd/acat-relay
 
