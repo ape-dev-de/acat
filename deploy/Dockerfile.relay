@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1
+FROM golang:1.24 AS build
+WORKDIR /src
+COPY go.mod ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w -X github.com/ape-dev-de/acat/internal/version.Version=${VERSION}" \
+      -o /out/acat-relay ./cmd/acat-relay
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/acat-relay /acat-relay
+USER nonroot:nonroot
+EXPOSE 8080
+ENTRYPOINT ["/acat-relay"]
