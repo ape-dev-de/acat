@@ -17,6 +17,8 @@ jobs:
         with:
           go-version: stable
           check-latest: true
+      - name: Install Linux GUI deps (cgo type-checking)
+        run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev
       - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
@@ -38,7 +40,7 @@ jobs:
           check-latest: true
       - name: Install Linux GUI deps
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev
+        run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev
       - name: Test
         run: go test -race -count=1 ./...
       - name: Build

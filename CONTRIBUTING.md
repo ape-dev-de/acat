@@ -11,6 +11,6 @@ By contributing you agree that your contributions are licensed under the Apache 
 ## Prerequisites
 
 - Go (version in `go.mod`), a C compiler (Fyne needs CGO)
-- Linux: `libgl1-mesa-dev xorg-dev`
+- Linux: `gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev`
 - golangci-lint v2, govulncheck
 - Node.js LTS (for `/video`, from M9)
