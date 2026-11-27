@@ -53,7 +53,7 @@ func Load() (Config, error) {
 
 func load(path string, getenv func(string) string) (Config, error) {
 	c := Config{ClientID: DefaultClientID, RelayURL: DefaultRelayURL}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is our own config dir, not user input
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 	case err != nil:
