@@ -5,7 +5,7 @@ PKG     := github.com/ape-dev-de/acat/internal/version
 LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE)
 BIN     := bin
 
-.PHONY: all build client relay demo snapshot video video-test test-electron test-load package testtest-integration lint vuln fmt tidy docker-relay clean
+.PHONY: all build client relay demo snapshot video video-test test-electron test-load package run install test test-integration lint vuln fmt tidy docker-relay clean
 
 all: build test lint
 
@@ -42,6 +42,41 @@ test-load:
 # Release bundle for this OS into dist/: make package VERSION=v0.2.0
 package:
 	scripts/package.sh $(VERSION)
+
+# Live defaults (public values: the client ID ships in every release anyway).
+# Override per call, e.g. make run CLIENT_ID=… RELAY_URL=…
+CLIENT_ID  ?= 28019cd6-31b0-4a65-a057-d14c6eff7a54
+RELAY_URL  ?= https://relay.acat.ape-dev.de
+DEV_VERSION = 0.0.0-dev.$(COMMIT)
+UNAME_S    := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+ELECTRON := video/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron
+else
+ELECTRON := video/node_modules/electron/dist/electron
+endif
+
+# Run the client against the live relay; uses the dev video helper if
+# 'make video' was run (otherwise calls stay disabled).
+run: client
+	@if [ -x "$(ELECTRON)" ] && [ -f video/dist/call.bundle.js ]; then \
+		echo "video helper: $(ELECTRON)"; \
+		ACAT_VIDEO_HELPER="$(abspath $(ELECTRON))" ACAT_VIDEO_APP="$(abspath video)" \
+		ACAT_CLIENT_ID=$(CLIENT_ID) ACAT_RELAY_URL=$(RELAY_URL) $(BIN)/acat; \
+	else \
+		echo "no video helper (run 'make video' for calls)"; \
+		ACAT_CLIENT_ID=$(CLIENT_ID) ACAT_RELAY_URL=$(RELAY_URL) $(BIN)/acat; \
+	fi
+
+# macOS: build acat.app (helper embedded, defaults baked in) and copy it to /Applications.
+install:
+ifneq ($(UNAME_S),Darwin)
+	$(error make install is macOS only; use 'make package' elsewhere)
+endif
+	APP_ONLY=1 ACAT_DEFAULT_CLIENT_ID=$(CLIENT_ID) ACAT_DEFAULT_RELAY_URL=$(RELAY_URL) scripts/package.sh $(DEV_VERSION)
+	@if pgrep -xq acat; then echo "acat is running: quit it first"; exit 1; fi
+	rm -rf /Applications/acat.app
+	ditto dist/acat.app /Applications/acat.app
+	@echo "installed /Applications/acat.app ($(DEV_VERSION))"
 
 test:
 	go test -race -count=1 ./...

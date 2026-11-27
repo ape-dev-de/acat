@@ -21,6 +21,8 @@ Out of scope: channels, files, calendar, apps/bots, whiteboard, recording, mobil
 
 - Admins / self-hosters: [docs/setup.md](docs/setup.md), [docs/self-hosting.md](docs/self-hosting.md)
 - Developers: `make build test lint`, then see [CONTRIBUTING.md](CONTRIBUTING.md)
+- Try it: `make demo` (sample data, no sign-in), `make run` (live, against the ape-dev relay; `make video` first for calls)
+- macOS: `make install` builds `acat.app` with the video helper and copies it to `/Applications` (unsigned, ad-hoc). Override `CLIENT_ID=` / `RELAY_URL=` for your own deployment.
 
 ## License
 

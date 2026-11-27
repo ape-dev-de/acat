@@ -6,6 +6,7 @@
 # Usage: scripts/package.sh <version>   (run from the repo root)
 # Optional signing (macOS): MACOS_SIGN_IDENTITY, and for notarization
 # APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD.
+# APP_ONLY=1 (macOS): stop after dist/acat.app, no .dmg (used by make install).
 set -euo pipefail
 
 VERSION="${1:?version}"
@@ -24,7 +25,8 @@ NAME="acat_${VERSION}_${GOOS}_${GOARCH}"
 rm -rf "$WORK" && mkdir -p "$WORK" "$OUT"
 
 echo "==> video helper"
-(cd video && npm ci --no-audit --no-fund && CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist -- "-c.extraMetadata.version=$VERSION")
+# Reinstall only when the lockfile is newer than the installed tree.
+(cd video && { [ node_modules/.package-lock.json -nt package-lock.json ] || npm ci --no-audit --no-fund; } && CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist -- "-c.extraMetadata.version=$VERSION")
 HELPER_DIR="$(ls -d video/release/*/ | grep -v builder | head -1)"
 
 echo "==> client"
@@ -55,6 +57,13 @@ darwin)
   else
     echo "!! MACOS_SIGN_IDENTITY not set: bundle is unsigned (ad-hoc)"
     codesign --force --deep --sign - "$APP"
+  fi
+  if [ "${APP_ONLY:-}" = 1 ]; then
+    rm -rf "$OUT/acat.app"
+    mv "$APP" "$OUT/acat.app"
+    rm -rf "$WORK"
+    echo "==> $OUT/acat.app"
+    exit 0
   fi
   hdiutil create -quiet -volname acat -srcfolder "$APP" -fs HFS+ -format ULMO -ov "$OUT/$NAME.dmg"
   if [ -n "${APPLE_ID:-}" ] && [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
