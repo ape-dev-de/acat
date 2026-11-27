@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=acat
+Comment=Lightweight Teams chat and calls
+Exec=acat
+Terminal=false
+Categories=Network;InstantMessaging;Chat;

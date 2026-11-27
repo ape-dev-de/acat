@@ -5,7 +5,7 @@ PKG     := github.com/ape-dev-de/acat/internal/version
 LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE)
 BIN     := bin
 
-.PHONY: all build client relay demo snapshot video video-test test-electron test test-integration lint vuln fmt tidy docker-relay clean
+.PHONY: all build client relay demo snapshot video video-test test-electron test-load package testtest-integration lint vuln fmt tidy docker-relay clean
 
 all: build test lint
 
@@ -33,6 +33,15 @@ video-test:
 # Real Electron helper end-to-end (after 'make video').
 test-electron:
 	go test -tags electron -count=1 ./internal/video/
+
+# Relay load test, 10k WebSockets by default (raise the fd limit first: ulimit -n 65536).
+LOAD_CONNS ?= 10000
+test-load:
+	ACAT_LOAD_CONNS=$(LOAD_CONNS) go test -tags load -count=1 -run TestLoad -v ./relay/
+
+# Release bundle for this OS into dist/: make package VERSION=v0.2.0
+package:
+	scripts/package.sh $(VERSION)
 
 test:
 	go test -race -count=1 ./...

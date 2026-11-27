@@ -52,11 +52,32 @@ type Client struct {
 	MaxBackoff time.Duration
 	// StableAfter resets the backoff once a connection lived this long.
 	StableAfter time.Duration
+	// PingInterval: the client pings the relay this often and reconnects
+	// if no pong arrives within PingTimeout (half-open TCP after network
+	// changes). The same tick detects system sleep.
+	PingInterval time.Duration
+	PingTimeout  time.Duration
+	// SleepThreshold: if wall-clock time advanced this much more than the
+	// monotonic clock between two ticks, the system slept and the
+	// connection is re-established at once.
+	SleepThreshold time.Duration
+
+	clock func() (wall, mono time.Duration) // tests
+}
+
+var monoStart = time.Now()
+
+func systemClock() (wall, mono time.Duration) {
+	return time.Duration(time.Now().UnixNano()), time.Since(monoStart)
 }
 
 // New returns a client with default backoff (1 s … 60 s).
 func New(relayURL, clientName string) *Client {
-	return &Client{URL: relayURL, ClientName: clientName, MinBackoff: time.Second, MaxBackoff: time.Minute, StableAfter: time.Minute}
+	return &Client{
+		URL: relayURL, ClientName: clientName,
+		MinBackoff: time.Second, MaxBackoff: time.Minute, StableAfter: time.Minute,
+		PingInterval: 30 * time.Second, PingTimeout: 10 * time.Second, SleepThreshold: 20 * time.Second,
+	}
 }
 
 // WSURL returns the WebSocket endpoint for a configured relay URL.
@@ -180,6 +201,10 @@ func (c *Client) session(ctx context.Context, wsURL string, out chan<- Event) er
 	}
 	send(ctx, out, Event{Kind: Connected, RoutingToken: w.RoutingToken, Features: w.Features})
 
+	wctx, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
+	go c.watchdog(wctx, conn)
+
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
@@ -194,6 +219,43 @@ func (c *Client) session(ctx context.Context, wsURL string, out chan<- Event) er
 			send(ctx, out, Event{Kind: Notification, Payload: push.Payload})
 		case protocol.TypeLifecycle:
 			send(ctx, out, Event{Kind: Lifecycle, Payload: push.Payload})
+		}
+	}
+}
+
+// watchdog pings the relay and drops the connection when it is dead or the
+// system woke from sleep; the read loop then fails and Run reconnects.
+func (c *Client) watchdog(ctx context.Context, conn *websocket.Conn) {
+	if c.PingInterval <= 0 {
+		return
+	}
+	clock := c.clock
+	if clock == nil {
+		clock = systemClock
+	}
+	tick := time.NewTicker(c.PingInterval)
+	defer tick.Stop()
+	lastWall, lastMono := clock()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		// The monotonic clock stops while the system sleeps; wall time does not.
+		w, m := clock()
+		slept := (w - lastWall) - (m - lastMono)
+		lastWall, lastMono = w, m
+		if c.SleepThreshold > 0 && slept > c.SleepThreshold {
+			_ = conn.CloseNow()
+			return
+		}
+		pctx, cancel := context.WithTimeout(ctx, c.PingTimeout)
+		err := conn.Ping(pctx)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			_ = conn.CloseNow()
+			return
 		}
 	}
 }

@@ -1,0 +1,83 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { pkg: ./relay/, fn: FuzzHook }
+          - { pkg: ./internal/render/, fn: FuzzHTML }
+          - { pkg: ./relay/, fn: FuzzACSClaims }
+          - { pkg: ./relay/, fn: FuzzACSConnectionString }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+      - name: Fuzz ${{ matrix.target.fn }}
+        run: go test -run '^$' -fuzz '^${{ matrix.target.fn }}$' -fuzztime 5m ${{ matrix.target.pkg }}
+      - name: Keep crashers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crashers-${{ matrix.target.fn }}
+          path: "**/testdata/fuzz/**"
+
+  fuzz-js:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: video
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: video/package-lock.json
+      - run: npm ci
+      - run: ACAT_FUZZ_ITERATIONS=200000 node --test test/fuzz.test.js
+
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+      - name: Relay load test (10k WebSockets)
+        run: |
+          ulimit -n 65536
+          sudo sysctl -w net.ipv4.ip_local_port_range="10240 65000"
+          ACAT_LOAD_CONNS=10000 go test -tags load -count=1 -run TestLoad -v -timeout 15m ./relay/
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - run: cd video && npm audit --omit=dev && npm audit --audit-level=high

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -130,5 +131,65 @@ func TestBackoffWhileRelayDown(t *testing.T) {
 	}
 	if len(events) < 3 {
 		t.Fatalf("expected several reconnect attempts, got %d", len(events))
+	}
+}
+
+// deafRelay completes the handshake and then never reads, so pings are
+// never answered (like a half-open TCP connection after a network change).
+func deafRelay(t *testing.T) *httptest.Server {
+	t.Helper()
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		var h protocol.Hello
+		if wsjson.Read(r.Context(), conn, &h) != nil {
+			return
+		}
+		_ = wsjson.Write(r.Context(), conn, protocol.Welcome{Type: protocol.TypeWelcome, Proto: protocol.RelayVersion, RoutingToken: "tok"})
+		<-r.Context().Done()
+	}))
+	t.Cleanup(hs.Close)
+	return hs
+}
+
+func TestDeadConnectionIsDetectedByPing(t *testing.T) {
+	hs := deafRelay(t)
+	c := New(hs.URL, "test")
+	c.MinBackoff, c.MaxBackoff = 10*time.Millisecond, 50*time.Millisecond
+	c.PingInterval, c.PingTimeout = 50*time.Millisecond, 100*time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := make(chan Event, 16)
+	go func() { _ = c.Run(ctx, events) }()
+	next(t, events, Connected)
+	next(t, events, Disconnected)
+	next(t, events, Connected)
+}
+
+func TestSleepTriggersReconnect(t *testing.T) {
+	_, hs := startRelay(t)
+	c := New(hs.URL, "test")
+	c.MinBackoff, c.MaxBackoff = 10*time.Millisecond, 50*time.Millisecond
+	c.PingInterval, c.PingTimeout = 20*time.Millisecond, time.Second
+	var calls atomic.Int64
+	c.clock = func() (time.Duration, time.Duration) {
+		n := time.Duration(calls.Add(1))
+		mono := n * 20 * time.Millisecond
+		if n >= 3 { // between tick 2 and 3 the "system slept" for an hour
+			return mono + time.Hour, mono
+		}
+		return mono, mono
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := make(chan Event, 16)
+	go func() { _ = c.Run(ctx, events) }()
+	first := next(t, events, Connected)
+	next(t, events, Disconnected)
+	if again := next(t, events, Connected); again.RoutingToken == first.RoutingToken {
+		t.Fatal("expected a fresh session after sleep")
 	}
 }

@@ -8,14 +8,56 @@
   "scripts": {
     "build": "node build.mjs",
     "start": "npm run build && electron .",
-    "test": "node --test test/*.test.js"
-  },
-  "dependencies": {
-    "@azure/communication-calling": "2.0.0",
-    "@azure/communication-common": "2.5.0"
+    "test": "node --test test/*.test.js",
+    "dist": "npm run build && electron-builder --dir --publish never"
   },
   "devDependencies": {
+    "@azure/communication-calling": "2.0.0",
+    "@azure/communication-common": "2.5.0",
     "electron": "45.5.0",
+    "electron-builder": "26.18.0",
     "esbuild": "0.28.2"
+  },
+  "build": {
+    "appId": "io.github.ape-dev-de.acat.video",
+    "productName": "acat-video",
+    "executableName": "acat-video",
+    "asar": true,
+    "electronLanguages": [
+      "en-US",
+      "de"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "package.json",
+      "src/main.js",
+      "src/preload.js",
+      "src/protocol.js",
+      "dist/**"
+    ],
+    "extraMetadata": {
+      "main": "src/main.js"
+    },
+    "mac": {
+      "target": "dir",
+      "category": "public.app-category.business",
+      "identity": null,
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "LSUIElement": true,
+        "NSMicrophoneUsageDescription": "acat uses the microphone for calls.",
+        "NSCameraUsageDescription": "acat uses the camera for video calls."
+      }
+    },
+    "win": {
+      "target": "dir"
+    },
+    "linux": {
+      "target": "dir"
+    }
   }
 }

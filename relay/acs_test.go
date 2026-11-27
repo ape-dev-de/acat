@@ -219,3 +219,26 @@ func TestACSLeavesNoTraces(t *testing.T) {
 		t.Error("upstream host logged")
 	}
 }
+
+func FuzzACSClaims(f *testing.F) {
+	f.Add("a.eyJvaWQiOiJvIiwidGlkIjoidCIsImFwcGlkIjoiYSJ9.c")
+	f.Add("..")
+	f.Add("x.!!!.y")
+	f.Fuzz(func(t *testing.T, jwt string) {
+		c, err := parseClaims(jwt)
+		if err == nil && (c.OID == "" || c.TID == "" || c.AppID == "") {
+			t.Fatalf("accepted claims without oid/tid/appid: %+v", c)
+		}
+	})
+}
+
+func FuzzACSConnectionString(f *testing.F) {
+	f.Add("endpoint=https://x.communication.azure.com/;accesskey=YWJj")
+	f.Add(";;=;endpoint=")
+	f.Fuzz(func(t *testing.T, s string) {
+		c, err := ParseACSConnectionString(s)
+		if err == nil && (c.Endpoint == nil || len(c.AccessKey) == 0) {
+			t.Fatalf("accepted incomplete connection string: %+v", c)
+		}
+	})
+}

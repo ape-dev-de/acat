@@ -11,3 +11,7 @@
 video/node_modules/
 video/dist/
 coverage.out
+video/release/
+video/dist/
+video/node_modules/
+dist/
