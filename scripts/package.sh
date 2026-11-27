@@ -30,7 +30,7 @@ HELPER_DIR="$(ls -d video/release/*/ | grep -v builder | head -1)"
 echo "==> client"
 EXE=acat
 [ "$GOOS" = windows ] && EXE=acat.exe
-go build -trimpath -ldflags "$LDFLAGS" -o "$WORK/$EXE" ./cmd/acat
+go build -trimpath -ldflags "$LDFLAGS" -o "$WORK/bin/$EXE" ./cmd/acat
 
 notices() {
   cp LICENSE NOTICE "$1/"
@@ -41,7 +41,7 @@ case "$GOOS" in
 darwin)
   APP="$WORK/acat.app"
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
-  mv "$WORK/acat" "$APP/Contents/MacOS/acat"
+  mv "$WORK/bin/acat" "$APP/Contents/MacOS/acat"
   ditto "$HELPER_DIR/acat-video.app" "$APP/Contents/Frameworks/acat-video.app"
   sed "s/@VERSION@/$VERSION/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
   notices "$APP/Contents/Resources"
@@ -65,7 +65,7 @@ darwin)
 windows)
   D="$WORK/acat"
   mkdir -p "$D"
-  mv "$WORK/acat.exe" "$D/"
+  mv "$WORK/bin/acat.exe" "$D/"
   cp -R "$HELPER_DIR" "$D/acat-video"
   notices "$D"
   (cd "$WORK" && 7z a -tzip -mx=9 "$OUT/$NAME.zip" acat >/dev/null)
@@ -73,7 +73,7 @@ windows)
 linux)
   D="$WORK/acat"
   mkdir -p "$D"
-  mv "$WORK/acat" "$D/"
+  mv "$WORK/bin/acat" "$D/"
   cp -R "$HELPER_DIR" "$D/acat-video"
   cp packaging/linux/acat.desktop "$D/"
   notices "$D"
