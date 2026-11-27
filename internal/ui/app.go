@@ -318,9 +318,11 @@ func (u *UI) loadSession(s *session) {
 	})
 	if err == nil {
 		st.SetChats(chats) // emits ChatsChanged → refreshChats on main goroutine
-		u.startLive(s)
-		u.startPresence(s)
+		// fyne.Do is asynchronous and FIFO: this runs after s.store is set
+		// above, and keeps stopLive/stopPresence on the main goroutine.
 		fyne.Do(func() {
+			u.startLive(s)
+			u.startPresence(s)
 			if u.current == s {
 				u.attachCalls(s)
 			}
